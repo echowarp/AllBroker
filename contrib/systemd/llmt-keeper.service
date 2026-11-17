@@ -1,0 +1,19 @@
+# Weight keeper: holds exported GPU weight memory across engine restarts.
+# FileDescriptorStore*: the held memory also survives a keeper restart or upgrade (docs/keeper.md).
+[Unit]
+Description=AllBroker weight keeper
+Before=docker.service
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/llmt-keeper --socket /run/llmt-whx/keeper.sock --fdstore /var/lib/llmt-whx/keeper-state.json
+RuntimeDirectory=llmt-whx
+RuntimeDirectoryPreserve=yes
+StateDirectory=llmt-whx
+FileDescriptorStoreMax=1024
+FileDescriptorStorePreserve=yes
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

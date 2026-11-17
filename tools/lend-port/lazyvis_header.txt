@@ -1,0 +1,41 @@
+"""llmt_kv.lazyvis: lazy vision encoder for vLLM Qwen3-VL-style towers, with a broker-managed host copy. The tower is
+not kept in VRAM, and not even in host RAM, while nobody sends images: it follows the same rules as KV.
+
+EXL3_LAZY_VISION=1:
+  - KV sizing as before: the tower leaves the device right after it is built (before the checkpoint is read), so vLLM
+    sizes the KV cache without it; the startup profile run streams it (activation reserve = its peak).
+  - Startup (after process_weights_after_loading): a manifest of the tower's final tensors (module path, name, shape,
+    dtype, byte offset in the entry layout), per-tensor crc32 + blake2b, and the content digest. Every tensor is
+    matched against the checkpoint on disk (raw bytes, or the checkpoint dtype converted to the model dtype as the
+    loader does; the 5090 and the Arc both load bf16 -> fp16): matching tensors can be reloaded from disk exactly,
+    the rest ("extras": the rotary cos/sin cache buffer, ~0.6 MB) stay in a small private host copy. The startup host
+    copy serves the profile run and the warm-up and is FREED when the engine is ready. Nothing goes to the broker at
+    startup.
+  - An image request (visual.forward) with the tower not resident:
+      source = broker entry (LOOKUP acquire=1 in the shared namespace EXL3_LAZY_VISION_NS; key = blake2b(model id |
+               manifest | content digest), so engines with identical bytes share one entry), copied from the pool
+               mapping, lease released right after the copy;
+      miss   = reload from the checkpoint, verified against the startup crc32s, stored as kind 5 (weights) with
+               cost_hint = reload ms (RESERVE -> read straight into the reserved slots -> verify -> COMMIT, then leased
+               like a hit); FULL / BUSY / any broker error: read into a temporary host buffer instead, dropped after
+               the copy. BUSY (another engine is storing it right now) first WAITs up to EXL3_LAZY_VISION_BUSY_WAIT_MS.
+    and then, as before, either
+      resident: copied in whole, kept while images keep coming, released after EXL3_LAZY_VISION_TTL s idle (120) or
+                under memory pressure; nothing is kept on the host;
+      streamed: block by block when there is no room (free + cached-unused < tower + activation reserve + margin);
+                the source (lease or temporary buffer) is held for that one forward only.
+    A lease that turns out invalid after the copy (release not OK, broker restarted, epoch changed) means the bytes
+    are not trusted: resident loads are redone from disk, a streamed forward is run again from disk.
+  - A checkpoint that no longer matches the startup checksums: logged as an ERROR, the broker is not used again by
+    this engine and the reloaded bytes are kept as a private host copy (the old behaviour) for the rest of its life.
+  - Broker down / tier off / client missing: disk path every time; the engine never fails because of the broker.
+    Client calls time out after EXL3_LAZY_VISION_BROKER_TIMEOUT_MS (100); a failed connect is retried at most every
+    EXL3_LAZY_VISION_BROKER_RETRY_S (30).
+Knobs: EXL3_LAZY_VISION_MODE=auto|stream|resident, _TTL, _MARGIN_MB (as before); _BROKER=auto (socket from vLLM's
+kv_transfer_config, else /run/llmt-kv/broker.sock) | off | <socket>; _NS (default weights:visual); _ENGINE_ID
+(default LLMT_KV_ENGINE_ID, else broker_engine_id, else 0); _STORE=1; _VERIFY_HIT=0 (crc the pool bytes on a hit);
+_DROP_CACHE=1 (fadvise DONTNEED the checkpoint range after a reload); _COLD_ON_RELEASE=1 (HEAT cold for the entry when
+the tower leaves VRAM after the TTL; needs a client with heat()); _KEEP_HOST=0 (1 = keep a private host copy, the
+old behaviour without pinning; no broker); _MODEL_DIR (default: vLLM's model path); _THREADS=4; _DISK_MBPS=500 (floor
+of cost_hint = bytes / this).
+Logs counts/timings only (no request data)."""

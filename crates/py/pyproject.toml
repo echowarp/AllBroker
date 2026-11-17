@@ -1,0 +1,20 @@
+[build-system]
+requires = ["maturin>=1.8,<2"]
+build-backend = "maturin"
+
+[project]
+name = "llmt-kv"
+version = "0.2.0"
+description = "AllBroker's vLLM plugin: shared host-RAM KV tier client, weight keeper loader, KV lending (LoRA, vision tower)"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+# vLLM loads general plugins in every process; each component stays off unless its environment variable is set
+# (see llmt_kv/plugin.py). The KV tier is configured through vLLM's OffloadingConnector (spec_module_path).
+[project.entry-points."vllm.general_plugins"]
+llmt = "llmt_kv.plugin:register"
+
+[tool.maturin]
+module-name = "llmt_kv._llmt_kv"
+python-source = "python"
+features = ["pyo3/extension-module"]

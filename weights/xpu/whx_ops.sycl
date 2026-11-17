@@ -1,0 +1,53 @@
+// whx: XPU (Intel Arc) weight holder ops. Level Zero DMA_BUF export / import of device memory inside torch's own SYCL
+// context, so a holder process can keep weights resident across engine restarts and the engine attaches them as
+// ordinary XPU tensors. Mechanism: zeMemAllocDevice + export desc, fd via zeMemGetAllocProperties, import with
+// ze_external_memory_import_fd_t. Ops: torch.ops.whx.export_alloc(nbytes) -> (uint8 tensor, fd),
+// torch.ops.whx.import_fd(fd, nbytes) -> uint8 tensor. Memory is freed (zeMemFree) when the tensor dies.
+#include <ATen/ATen.h>
+#include <torch/library.h>
+#include <c10/xpu/XPUStream.h>
+#include <sycl/sycl.hpp>
+#include <sycl/ext/oneapi/backend/level_zero.hpp>
+#include <level_zero/ze_api.h>
+#include <tuple>
+
+static sycl::queue& Q(int64_t dev) { return c10::xpu::getCurrentXPUStream((c10::DeviceIndex)dev).queue(); }
+
+static at::Tensor wrap(void* v, int64_t nbytes, ze_context_handle_t zc, int64_t dev) {
+    return at::from_blob(v, {nbytes}, [zc](void* p) { zeMemFree(zc, p); },
+                         at::TensorOptions().dtype(at::kByte).device(at::Device(at::kXPU, (c10::DeviceIndex)dev)));
+}
+
+std::tuple<at::Tensor, int64_t> whx_export_alloc(int64_t nbytes, int64_t dev) {
+    auto& q = Q(dev);
+    auto zc = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(q.get_context());
+    auto zd = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(q.get_device());
+    ze_external_memory_export_desc_t ed{ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_EXPORT_DESC, nullptr, ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF};
+    ze_relaxed_allocation_limits_exp_desc_t rl{ZE_STRUCTURE_TYPE_RELAXED_ALLOCATION_LIMITS_EXP_DESC, &ed, ZE_RELAXED_ALLOCATION_LIMITS_EXP_FLAG_MAX_SIZE};
+    ze_device_mem_alloc_desc_t dd{ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC, &rl, 0, 0};
+    void* v = nullptr;
+    ze_result_t r = zeMemAllocDevice(zc, &dd, (size_t)nbytes, 1 << 16, zd, &v);
+    TORCH_CHECK(r == ZE_RESULT_SUCCESS && v, "whx: zeMemAllocDevice(export) failed: ", (int)r);
+    ze_external_memory_export_fd_t ef{ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_EXPORT_FD, nullptr, ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF, -1};
+    ze_memory_allocation_properties_t mp{ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES, &ef};
+    r = zeMemGetAllocProperties(zc, v, &mp, nullptr);
+    if (r != ZE_RESULT_SUCCESS || ef.fd < 0) { zeMemFree(zc, v); TORCH_CHECK(false, "whx: export fd failed: ", (int)r); }
+    return {wrap(v, nbytes, zc, dev), (int64_t)ef.fd};
+}
+
+at::Tensor whx_import_fd(int64_t fd, int64_t nbytes, int64_t dev) {
+    auto& q = Q(dev);
+    auto zc = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(q.get_context());
+    auto zd = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(q.get_device());
+    ze_external_memory_import_fd_t imp{ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD, nullptr, ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF, (int)fd};
+    ze_device_mem_alloc_desc_t dd{ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC, &imp, 0, 0};
+    void* v = nullptr;
+    ze_result_t r = zeMemAllocDevice(zc, &dd, (size_t)nbytes, 1 << 16, zd, &v);
+    TORCH_CHECK(r == ZE_RESULT_SUCCESS && v, "whx: import of fd ", fd, " failed: ", (int)r);
+    return wrap(v, nbytes, zc, dev);
+}
+
+TORCH_LIBRARY(whx, m) {
+    m.def("export_alloc(int nbytes, int dev=0) -> (Tensor, int)", &whx_export_alloc);
+    m.def("import_fd(int fd, int nbytes, int dev=0) -> Tensor", &whx_import_fd);
+}

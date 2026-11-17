@@ -1,0 +1,32 @@
+{
+ "inputs": {
+  "llmt_lazyvis.py": "11a0a669ac00ed54d7130593db49dba9",
+  "llmt_lora.py": "cb0c54ef544b1da3474cb548f254eb7a",
+  "tests/test_chain_cpu.py": "78e0b1585becfd83a00d561fe95f38de",
+  "tests/test_compact_cpu.py": "a50a2dfe47b644e1c7c96b286486ed11",
+  "tests/test_compact_kv_cpu.py": "ec8dffe58243e4511ec31c8f60d3572b",
+  "tests/test_lend_cpu.py": "60f5fad9009b71d6511ff0f41013e76e",
+  "tests/test_lgraph_cpu.py": "21f53aede22b4b9557f811c31d1730ca",
+  "tests/test_moveguard_cpu.py": "6b8923bf5ddea7604c3fef22ed7e5628",
+  "tests/test_prof_cpu.py": "2604ff8c2f0ae1bd185bdec5bfec97c6",
+  "tests/test_slots_cpu.py": "8428f2e87d0afcc313acaa718531f3a0",
+  "tests/test_vislend_cpu.py": "35b8a211740223e14e2360978712af43",
+  "tests/test_whx_lazyvis_cpu.py": "13424680e3d62faf5b5a4f88f6550bfd"
+ },
+ "outputs": {
+  "crates/py/python/llmt_kv/lazyvis.py": "24e25c70915a758881dada77c3365b43",
+  "crates/py/python/llmt_kv/lend.py": "8cd697f1917b68053baafe03cac0e602",
+  "crates/py/tests/lend/test_chain_cpu.py": "f3ff8117aa81b1ad7e3101e4dcf2fbf5",
+  "crates/py/tests/lend/test_compact_cpu.py": "f12afa2b9e89a6a42b04988a0e80fc05",
+  "crates/py/tests/lend/test_compact_kv_cpu.py": "3759d3c417e944a74f8a4007241b2b96",
+  "crates/py/tests/lend/test_lend_cpu.py": "1bac6e2516a0d18ec58500d4ed0b6fc0",
+  "crates/py/tests/lend/test_lgraph_cpu.py": "084ccd25af9c346757d5472359f3b1e1",
+  "crates/py/tests/lend/test_moveguard_cpu.py": "74255ba5b312f0462abc29019b9ba2b0",
+  "crates/py/tests/lend/test_prof_cpu.py": "0e7d2580ce2180bd72bd35da334f8c8d",
+  "crates/py/tests/lend/test_slots_cpu.py": "a24c777d0f1ca2a1e03ce97595ef4f55",
+  "crates/py/tests/lend/test_vislend_cpu.py": "5b75c20515bd669ee4f336fdbbc2a3e9",
+  "crates/py/tests/lend/test_whx_lazyvis_cpu.py": "13424680e3d62faf5b5a4f88f6550bfd"
+ },
+ "source_commit": "8783a031430ec21e76c74434e2a671f1bbc99422",
+ "note": "lend.py and hooked.py were edited by hand after this port (the prefill-borrowing code and its allocator shim removed; skipped_waiting scan, pending-keep, LoRA-step MLP row split and whole-tower lend added). Re-porting from the source tree needs those changes carried over first."
+}

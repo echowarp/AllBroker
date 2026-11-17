@@ -1,0 +1,17 @@
+# Example unit for the broker. Small and latency-sensitive: normal priority (requests sit on the engines' scheduler
+# path). Size --pool-gib to fit /dev/shm with room for everything else that uses it.
+[Unit]
+Description=AllBroker KV broker
+Before=docker.service
+
+[Service]
+ExecStart=/usr/local/bin/llmt-kvbroker --pool-gib 16 --slot-kib 2048 --pool-dir /dev/shm/llmt-kv \
+    --socket /run/llmt-kv/broker.sock --metrics 127.0.0.1:9103 --disk-dir /var/lib/llmt-kv/ssd --disk-gib 40
+RuntimeDirectory=llmt-kv
+RuntimeDirectoryPreserve=yes
+LimitMEMLOCK=infinity
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

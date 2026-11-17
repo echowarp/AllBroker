@@ -1,0 +1,25 @@
+# AllBroker weight keeper, one instance per GPU (e.g. llmt-keeper@gpu0, llmt-keeper@gpu1): holds the VRAM of the
+# engine's exported weights across engine restarts (docs/keeper.md). One per GPU, because a failed attach drops every
+# entry of its keeper; pair it with EXL3_WHX_EXCLUSIVE=1 in that GPU's engine.
+# While an engine is down its keeper still holds the weights' VRAM: `llmt-keeper-ctl <instance> drop-all` before
+# anything else needs the whole GPU. Stopping the unit does NOT free it (fd store, Preserve=yes);
+# `systemctl clean --what=fdstore llmt-keeper@<instance>` after the stop does.
+# Engine side: EXL3_WHX=/run/llmt-keeper-<instance>/keeper.sock.
+[Unit]
+Description=AllBroker weight keeper (%i)
+Before=docker.service
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/llmt-keeper --socket /run/llmt-keeper-%i/keeper.sock --max-gib 17 --fdstore /var/lib/llmt-keeper/%i/state.json
+RuntimeDirectory=llmt-keeper-%i
+RuntimeDirectoryPreserve=yes
+StateDirectory=llmt-keeper/%i
+FileDescriptorStoreMax=256
+FileDescriptorStorePreserve=yes
+Restart=always
+RestartSec=1
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

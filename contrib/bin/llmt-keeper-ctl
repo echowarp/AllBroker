@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""llmt-keeper-ctl <instance|socket path> list | held-mib | drop-all
+<instance>: the llmt-keeper@<instance> unit (socket /run/llmt-keeper-<instance>/keeper.sock), or a socket path.
+held-mib prints 0 when the keeper is not running. drop-all frees the held VRAM once no running engine maps it: run it
+before anything else that needs the whole GPU starts while the engine is stopped."""
+import json
+import socket
+import sys
+
+
+def rpc(sock, req):
+    s = socket.socket(socket.AF_UNIX)
+    s.settimeout(10)
+    s.connect(sock)
+    d = json.dumps(req).encode()
+    socket.send_fds(s, [len(d).to_bytes(8, "little")], [])
+    s.sendall(d)
+    h, fds, _, _ = socket.recv_fds(s, 8, 256)
+    n = int.from_bytes(h, "little")
+    b = b""
+    while len(b) < n:
+        b += s.recv(n - len(b))
+    return json.loads(b)
+
+
+if len(sys.argv) != 3 or sys.argv[2] not in ("list", "held-mib", "drop-all"):
+    sys.exit(__doc__)
+inst, op = sys.argv[1:]
+sock = inst if "/" in inst else f"/run/llmt-keeper-{inst}/keeper.sock"
+try:
+    held = rpc(sock, {"op": "list"})
+except OSError:
+    if op == "held-mib":
+        print(0)
+        sys.exit(0)
+    raise
+if op == "list":
+    print(json.dumps(held, indent=1))
+elif op == "held-mib":
+    print(sum(v.get("bytes", 0) for v in held.values()) >> 20)
+else:
+    for k in held:
+        rpc(sock, {"op": "drop", "key": k})
+    print(f"dropped {len(held)} entries ({sum(v.get('bytes', 0) for v in held.values()) / 2**30:.2f} GiB)")

@@ -1,0 +1,35 @@
+[package]
+name = "llmt-kvbroker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+kvproto = { path = "../proto" }
+kvcore = { path = "../core" }
+kvchains = { path = "../chains" }
+libc = "0.2"
+# lock-order checking: debug / test builds panic on the first lock-order inversion (a potential
+# deadlock, even if it never happened); release builds use the plain std types
+tracing-mutex = "0.3"
+# owned shared mappings (shm.rs): a span cannot outlive its mapping
+memmap2 = "0.9"
+zstd = "0.13"
+# integrity checksums of RAM entries (lazy.rs checksum_loop): XXH3-64, streaming
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+kvslotz = { path = "../slotz" }
+# operation trace (trace.rs): ring + dump format shared with kvbench replay
+kvtrace = { path = "../trace" }
+# background worker mode (bg.rs): the worker talks to the broker as a client
+kvclient = { path = "../client" }
+ngram-store = { path = "../ngram-store" }
+# fault injection: named failpoints at recovery-relevant spots (fp.rs); without the `failpoints` feature
+# every failpoint compiles to nothing (production builds)
+fail = "0.5"
+
+[features]
+failpoints = ["fail/failpoints"]
+
+[dev-dependencies]
+kvclient = { path = "../client" }
+kvslotz = { path = "../slotz" }

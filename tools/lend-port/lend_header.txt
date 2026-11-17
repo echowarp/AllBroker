@@ -1,0 +1,39 @@
+"""llmt_kv.lend: the lend manager. VRAM that vLLM sized as KV cache is lent, block by block, to other tenants while
+they need it, and returned to KV when they are done. KV always wins.
+
+Tenants (borrowers):
+  LoRA adapters   slot buffers (punica lora_a/b_stacked) live in lent KV blocks only while an adapter is active
+                  (EXL3_LORA_HOT=1; vLLM started with --enable-lora --max-loras N --max-lora-rank R and
+                  VLLM_ALLOW_RUNTIME_LORA_UPDATING=1). The adapter bytes are a broker kind-5 (weights) entry shared by
+                  every engine with the same adapter file, read from the broker's pool on activation.
+  vision tower    the lazy vision tower (llmt_kv.lazyvis) is placed into lent pages when it is needed (VIS-LEND).
+
+Policy:
+  chain-aware compaction   prefix-cache chains are valued (request class, session liveness, reuse); before a lend the
+                           manager scores candidate regions and moves the cheapest blocks out of the way
+  region scoring           score_region(pool, lo, n): the cost of clearing a block range
+  victim eviction          free blocks first, then cached blocks of the lowest-value chains
+  move guard               in-use block moves are deferred while an async-scheduled step or a pending KV-RING copy
+                           may still read the block
+  regret counters          chain blocks dropped by a lend and asked for again soon after are counted
+  LEND-STATS               lending / compaction / regret / fragmentation counters, logged periodically
+
+vLLM integration: a vllm.general_plugins entry point (llmt_kv.plugin:register). Scheduler, block-pool, model-runner
+and worker points go through llmt_kv.vllm_hooks: echowarp/vllm's extension hooks natively, a one-time method wrapper on
+stock vLLM. LoRA internals (punica wrapper, LoRA layers, cudagraph dispatch for LoRA steps, the LoRA model-runner mixin)
+are still wrapped directly; see docs/vllm-plugin.md for the list and the hooks that would replace them.
+Admission hold / priority preemption for a full KV pool: extension point set_admission_policy() (hook scheduler.admit,
+echowarp/vllm only); no policy ships yet.
+
+Why stock vLLM LoRA applies nothing in compiled mode: the punica wrapper and the LoRA layers decide in Python whether a
+LoRA is active. Dynamo traces the model once, at the startup profile run with no adapter active, and vLLM drops all
+guards, so the compiled graph has the LoRA terms traced out. This module keeps the compiled + graph path exactly the
+base model (the LoRA layers return the base output while Dynamo traces, the dispatcher captures only no-LoRA graphs)
+and runs a step with any LoRA token eagerly (forward_context.skip_compiled), or from a separate LoRA graph pool.
+
+Knobs (all optional): EXL3_LORA_TTL (300), EXL3_LORA_MARGIN_MB (256), EXL3_LORA_MODE auto|device|host,
+EXL3_LORA_BROKER auto|off|<sock>, EXL3_LORA_NS, EXL3_LORA_ENGINE_ID, EXL3_LORA_STORE (1), EXL3_LORA_VERIFY_HIT (0),
+EXL3_LORA_DIR (adapter directory for load-by-name), EXL3_LORA_TIMEOUT_MS (100), EXL3_LORA_BUSY_WAIT_MS (5000),
+EXL3_LEND_* (see docs/lend.md).
+Ported from an internal tree with tools/lend-port/port.py; SYNC.json there names the source commit.
+Logs counts / timings / sizes only (no request data)."""

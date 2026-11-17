@@ -1,0 +1,15 @@
+[package]
+name = "llmt-kv-py"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "_llmt_kv"
+crate-type = ["cdylib"]
+
+[dependencies]
+kvclient = { path = "../client" }
+kvchains = { path = "../chains" }
+kvslotz = { path = "../slotz" }
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py310"] }

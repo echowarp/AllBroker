@@ -1,0 +1,12 @@
+[package]
+name = "kvcore"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+kvproto = { path = "../proto" }
+
+[dev-dependencies]
+# model-based property tests (src/model_tests.rs)
+proptest = "1"

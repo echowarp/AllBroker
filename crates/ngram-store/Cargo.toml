@@ -1,0 +1,12 @@
+[package]
+name = "ngram-store"
+version = "0.1.0"
+edition = "2021"
+description = "Qwen3.8-Flash-Next n-gram (PLE) table store: exact row hashing, codecs, io_uring direct reads, row cache"
+publish = false
+license = "MIT"
+
+[dependencies]
+io-uring = "0.7"
+libc = "0.2"
+

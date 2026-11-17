@@ -1,0 +1,12 @@
+{
+ "lazyvis": {
+  "install": "d918400451899d713c82660400c4f117"
+ },
+ "lend": {
+  "_lent_count": "3cedfbfcd8bf61ecaa025911221524fd",
+  "_patch_block_pool": "38fba13676cbd9cb73ac88470300e3f2",
+  "_patch_kv_layout": "c3a4a4c15486322763777f0fa3949019",
+  "_patch_memory_hooks": "48742191cdee1398d9effa72f0e3da31",
+  "_patch_scheduler": "3568ec07105df19e75a07f7730ed4e98"
+ }
+}

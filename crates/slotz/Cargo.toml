@@ -1,0 +1,14 @@
+[package]
+name = "kvslotz"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# integrity checksums of slot contents: raw_xxh3, shared by the broker and its background worker
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+zstd = "0.13"
+
+[dev-dependencies]
+# fuzz-style property tests (tests/props.rs)
+proptest = "1"

@@ -1,0 +1,12 @@
+[package]
+name = "kvbench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+kvslotz = { path = "../slotz" }
+kvproto = { path = "../proto" }
+kvclient = { path = "../client" }
+kvtrace = { path = "../trace" }
+ngram-store = { path = "../ngram-store" }

@@ -1,0 +1,11 @@
+[package]
+name = "kvclient"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+kvproto = { path = "../proto" }
+libc = "0.2"
+# owned pool mapping: a slot borrowed from a PoolMap cannot outlive it (compile error, not a segfault)
+memmap2 = "0.9"

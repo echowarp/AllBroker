@@ -1,0 +1,14 @@
+[package]
+name = "llmt-keeper"
+description = "Weight keeper: holds exported GPU weight memory (dma-buf / CUDA POSIX fds) across engine restarts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+libc = "0.2"
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[[bin]]
+name = "llmt-keeper"
+path = "src/main.rs"

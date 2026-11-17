@@ -1,0 +1,15 @@
+AllBroker
+Copyright (c) 2026 Evan Boldt. Licensed under the MIT License (LICENSE).
+
+This repository includes or derives from the following third-party work:
+
+- gufo (https://github.com/gufo-org/gufo, MIT License), Copyright (c) 2026 gufo contributors.
+  crates/ngram-store/src/hash.rs is a port of gufo's n-gram row hash (HashNgramRows), and
+  crates/ngram-store/parity/gufo_hash.cpp contains that function extracted verbatim for a bit-exactness test.
+  gufo's license text, which applies to those portions: LICENSES/gufo-MIT.txt.
+
+- Barlow and Barlow Condensed fonts (SIL Open Font License 1.1), Copyright 2017 The Barlow Project Authors,
+  bundled in docs/charts/fonts/ (license text: docs/charts/fonts/OFL.txt) for rendering the documentation graphics.
+
+- The "Qwen" name refers to the Qwen model family by Alibaba Cloud; it is used here only to identify the models the
+  broker was built and measured with. No affiliation or endorsement is implied.
