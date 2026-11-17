@@ -23,6 +23,41 @@ The plugin works with stock vLLM 0.26 and uses the small extension hooks in
 Kernels are not here: [echowarp/exllamav3](https://github.com/echowarp/exllamav3) (NVIDIA) and
 [echowarp/exl3xpu](https://github.com/echowarp/exl3xpu) (Intel) only do fast math; what stays in VRAM is decided here.
 
+## Results
+
+Measured in the [AllRunner](https://github.com/echowarp/AllRunner) deployment: Qwen3.8-27B EXL3 4.0 bpw with int4 KV
+on one RTX 5090 and one Arc Pro B70, both engines on one broker. The charts are generated in AllRunner
+([benchmarks/charts](https://github.com/echowarp/AllRunner/tree/main/benchmarks/charts)) from its data files; methods
+and sources are in its [benchmarks/README.md](https://github.com/echowarp/AllRunner/blob/main/benchmarks/README.md).
+
+![Two GPUs, one cache](docs/img/system.png)
+
+Both engines map one 10 GiB host-RAM pool (186 slots of 3,200 tokens: at most about 0.60M tokens, since GDN-state
+entries share the slots) next to 436,585 (RTX 5090) and 497,302 (Arc B70) tokens of KV cache in VRAM, about 1.5M
+tokens in all; a prefix one GPU prefilled can be loaded by the other. The SSD tier is marked "next": it is in this
+repo, but the measured deployment runs without it.
+
+![Reserve nothing, borrow everything](docs/img/on-demand.png)
+
+VRAM is KV by default: the vision tower and LoRA adapters borrow the coldest KV blocks while they run (the evicted
+blocks' copies stay in the RAM tier) and give them back. On the RTX 5090 the lazy vision tower, packed KV and vision
+lending together raised the KV cache from 436,585 to 482,846 tokens (+46,261, +10.6 %), same configuration otherwise.
+
+![Tool results: prefill only what's new](docs/img/tail-reuse.png)
+
+For a median tool-result turn (modeled on 5,861 real turns: a 1,152-token reply, then a 1,899-token tool result),
+stock vLLM's block-rounded prefix cache recomputes 2,032 tokens before the new ones; with the token-exact tail hold
+only the 1,899 new tokens are prefilled. The hold itself is in [echowarp/vllm](https://github.com/echowarp/vllm); the
+broker keeps partial tails with their GDN state when they spill to RAM.
+
+![Real agent traffic: shorter wait per turn](docs/img/cache-production.png)
+
+Replay of 14,869 production agent requests: median prefill wait per turn 0.21 s vs 0.60 s with stock vLLM prefix
+caching and 16-bit KV (after a tool result 0.33 s vs 0.69 s), and 4.3 instead of 8.8 agent-hours of decode lost to
+other agents' prefills (17.0 without a cache). Modeled from the measured cold-prefill curve, not timed; this replay
+does not model the RAM tier, so it shows the tail hold and int4 KV. On real RTX 5090 agent traffic the RAM tier
+supplied 2.6 % of prompt tokens, the GPU prefix cache 59.7 %.
+
 ## What it does
 
 - **Shared KV tier in host RAM.** One pool file in shared memory that every engine maps. Engines copy KV blocks in
