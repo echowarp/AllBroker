@@ -7,7 +7,8 @@ memory-managed tier below VRAM: host RAM first, then an SSD. Engines hand it wha
 back on the next turn, the next request, or the next start, without recomputing it.
 
 It is built for agent workloads: tool calls, long contexts, several agents at once, where most of each prompt was
-already seen on an earlier turn. Benchmarks and the full serving stack: [AllRunner](https://github.com/echowarp/AllRunner).
+already seen on an earlier turn. It runs together with a vLLM fork and an EXL3 kernel plugin (see
+[Companion repos](#companion-repos)); [AllRunner](https://github.com/echowarp/AllRunner) builds and runs the whole stack.
 
 ## Results
 
@@ -53,10 +54,22 @@ AllBroker has three parts, each usable on its own:
 | **Weight keeper** (`llmt-keeper` + `llmt_kv.whx_loader`) | restart a vLLM engine in seconds: weights stay resident in GPU memory across engine restarts | `crates/keeper`, [docs/keeper.md](docs/keeper.md) |
 | **vLLM plugin** (`llmt_kv`) | the KV-tier connector, the keeper loader, the lazy vision tower and the lend manager (VRAM lent from KV to LoRA adapters and the vision tower, returned when they are done) | `crates/py`, [docs/vllm-plugin.md](docs/vllm-plugin.md), [docs/lend.md](docs/lend.md) |
 
-The plugin works with stock vLLM 0.26 and uses the small extension hooks in
-[echowarp/vllm](https://github.com/echowarp/vllm) when they are there (design note: [docs/vllm-plugin.md](docs/vllm-plugin.md)).
-Kernels are not here: [echowarp/exllamav3](https://github.com/echowarp/exllamav3) (NVIDIA) and
-[echowarp/exl3xpu](https://github.com/echowarp/exl3xpu) (Intel) only do fast math; what stays in VRAM is decided here.
+## Companion repos
+
+The results above come from AllBroker running with these repos. Use them together; the image builds in AllRunner pin
+a tested commit of each.
+
+| Repo | Branch | What AllBroker gets from it |
+|---|---|---|
+| [echowarp/vllm](https://github.com/echowarp/vllm) | `publish-20261113-cuda` (NVIDIA) / `publish-20261113-xpu` (Intel Arc) | the engine: named extension hooks the plugin attaches to, KV offload for hybrid (attention + GDN) models with MTP, the token-exact prefix-cache tail hold, packed KV |
+| [echowarp/exllamav3](https://github.com/echowarp/exllamav3) | `publish-20261113` (`exl3cuda/`) | NVIDIA runtime: EXL3 kernels, int4 KV, the weight-keeper callbacks |
+| [echowarp/exl3xpu](https://github.com/echowarp/exl3xpu) | `publish-20261113` | Intel Arc runtime: EXL3 kernels, int4 KV, the weight-keeper callbacks |
+| [echowarp/AllRunner](https://github.com/echowarp/AllRunner) | `main` | Docker images pinning all of the above, launchers, router, benchmarks: the quickest way to run the stack |
+
+On stock vLLM 0.26 the plugin falls back to wrapping vLLM methods for its own hooks
+([docs/vllm-plugin.md](docs/vllm-plugin.md)), but the hybrid-model offload, the tail hold and packed KV are only in
+the fork, and EXL3 models and the weight keeper need one of the two kernel plugins. Kernels are not here: they only do
+fast math; what stays in VRAM is decided here.
 
 ## What it does
 
