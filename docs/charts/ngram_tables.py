@@ -30,7 +30,7 @@ READ_US = [68, 71, 78, 90, 107]
 # bin format (crates/ngram-store/src/bins.rs): u32 count | u32 reserved | count x u64 key | count x bundle
 BIN_HEAD, KEY, BUNDLE = 8, 8, 8 * 232   # lossless bf16 bundle: 8 rows x 232 B
 
-W, H = 13.0, 31.2
+W, H = 13.0, 33.3
 fig = plt.figure(figsize=(W, H))
 S.background(fig)
 ax = fig.add_axes([0, 0, 1, 1], zorder=2); ax.set_xlim(0, W); ax.set_ylim(0, H); ax.axis("off")
@@ -87,12 +87,103 @@ def bundle(x, y, w, h, label, tri, dashed=False, size=11.5):
 t(0.55, H - 0.72, "N-gram tables from the SSD, not VRAM", 34, weight="bold", fam=S.DISPLAY)
 t(0.55, H - 1.12, "Qwen3.8-Flash-Next's per-layer n-gram embeddings are read through AllBroker: clustered SSD reads, "
                   "a shared RAM row cache, exact bf16 rows", 13, MUT)
-t(0.55, H - 1.68, "How a token's rows are found", 21, weight="bold", fam=S.DISPLAY, color=S.OURS_2)
+t(0.55, H - 1.68, "Results", 21, weight="bold", fam=S.DISPLAY, color=S.OURS_2)
+
+
+def R(x, y, w, h):
+    """inches -> figure fraction"""
+    return [x / W, y / H, w / W, h / H]
+
+
+def card(rect_in, title, sub):
+    x, y, w, h = rect_in
+    box(x, y, w, h, S.HERO_TILE, r=0.14, alpha=S.HERO_TILE_ALPHA, z=1)
+    t(x + 0.24, y + h - 0.45, title, 19, weight="bold", fam=S.DISPLAY)
+    t(x + 0.24, y + h - 0.75, sub, 11, MUT)
+
+
+# ---------------------------------------------------------------- the three result panels
+def plain_ax(rect_in):
+    a = fig.add_axes(R(*rect_in), zorder=3); a.set_facecolor("none"); a.grid(False)
+    for sp in a.spines.values():
+        sp.set_visible(False)
+    a.tick_params(colors=S.MUTED, length=0, pad=6)
+    return a
+
+
+def hbars(a, labels, vals, ours, fmt, top=None, room=1.38):
+    n = len(vals); y = np.arange(n)[::-1]; hi = top or max(vals)
+    for yy, lab, v, o in zip(y, labels, vals, ours):
+        a.barh([yy], [v], height=0.6, color=S.OURS if o else S.HERO_OTHER)
+        a.text(v + hi * 0.03, yy, fmt(v), va="center", fontfamily=S.DISPLAY, fontsize=15, fontweight="bold",
+               color=S.INK if o else S.MUTED)
+    a.set_yticks(y, labels, fontsize=12); a.set_xticks([]); a.set_xlim(0, hi * room); a.set_ylim(-0.6, n - 0.4)
+
+
+CB, CT = H - 1.95 - 5.6, H - 1.95   # card bottom / top (inches)
+LW = 5.85
+# 1: grouped bins vs single rows
+card((0.4, CB, LW, CT - CB), "A third of the disk reads", "Disk reads per token, decode, cold cache")
+a = plain_ax((0.95, CB + 0.55, LW - 0.9, CT - CB - 1.9))
+x = np.arange(len(TEXTS)); bw2 = 0.38
+b1 = a.bar(x - bw2 / 2, ROWS, bw2, color=S.HERO_OTHER, label="Single-row reads")
+b2 = a.bar(x + bw2 / 2, BINS, bw2, color=S.OURS, label="Grouped bins")
+for bars, col in ((b1, S.MUTED), (b2, S.INK)):
+    for b in bars:
+        a.annotate(f"{b.get_height():.1f}", (b.get_x() + b.get_width() / 2, b.get_height()), xytext=(0, 4),
+                   textcoords="offset points", ha="center", fontfamily=S.DISPLAY, fontsize=14, fontweight="bold",
+                   color=col)
+for xi, r, b in zip(x, ROWS, BINS):
+    a.annotate(f"−{1 - b / r:.0%}", (xi + bw2 / 2, b), xytext=(0, 24), textcoords="offset points", ha="center",
+               fontsize=11, fontweight="bold", color=S.OURS_2)
+a.set_xticks(x, TEXTS, fontsize=12.5); a.set_yticks([]); a.set_ylim(0, 13.5)
+a.spines["bottom"].set_visible(True); a.spines["bottom"].set_color(S.HERO_OTHER)
+a.legend(loc="upper left", bbox_to_anchor=(0.0, 1.06), ncol=2, fontsize=11, handlelength=1.2)
+
+RX, RW = 0.4 + LW + 0.3, W - 0.8 - LW - 0.3
+mid = (CB + CT) / 2
+# 2: formats
+card((RX, mid + 0.15, RW, CT - mid - 0.15), "Exact rows cost only SSD space",
+     "Disk reads per token on new text · host time per token")
+a = plain_ax((RX + 1.95, mid + 0.4, RW - 2.35, CT - mid - 1.65))
+hbars(a, [f[0] for f in FORMATS], [f[1] for f in FORMATS], [f[3] for f in FORMATS],
+      lambda v: f"{v:.2f}" if v < 3 else f"~{v:.0f}", room=1.5)
+for (name, v, us, o), yy in zip(FORMATS, np.arange(len(FORMATS))[::-1]):
+    a.text(8.0 * 1.5, yy, f"{us} µs" if us else "—", va="center", ha="right", fontsize=12,
+           color=S.INK if o else S.MUTED)
+a.text(8.0 * 1.5, 2.62, "host time", va="center", ha="right", fontsize=10.5, color=S.MUTED)
+
+# 3: vs the engine's own reader
+card((RX, CB, RW, mid - 0.15 - CB), "30× fewer reads once warm", "Disk reads per round of ~1 M row lookups")
+a = plain_ax((RX + 1.95, CB + 0.3, RW - 2.35, mid - CB - 1.6))
+hbars(a, [r[0] for r in ROUND], [r[1] for r in ROUND], [r[2] for r in ROUND], lambda v: f"{v / 1000:.0f}k")
+
+
+# ---------------------------------------------------------------- why not just mmap the table?
+MM_H = 2.55
+MT = CB - 0.3; MB = MT - MM_H
+box(0.4, MB, W - 0.8, MM_H, S.HERO_TILE, r=0.14, alpha=S.HERO_TILE_ALPHA, z=1)
+t(0.64, MT - 0.5, "Why not just mmap the table?", 19, weight="bold", fam=S.DISPLAY)
+why = [("Locality", ["Rows are hashed, so neighbours on disk are unrelated n-grams: page readahead fetches data "
+                     "nobody needs."]),
+       ("Read count", ["Without bins every row is its own read: 6.5–10.9 single-row reads per token in our runs "
+                       "(grouped bins: 2.5–3.7)."]),
+       ("Memory", ["The page cache is plain LRU: one-off prompt n-grams push the hot rows out. The broker's row "
+                   "cache is shared by", "every engine and gives memory back to KV under pressure."])]
+fy = MT - 0.98
+for head, lines in why:
+    t(0.64, fy, head, 12.5, S.OURS_2, weight="bold")
+    for k, line in enumerate(lines):
+        t(2.0, fy - 0.27 * k, line, 11, TXT)
+    fy -= 0.27 * len(lines) + 0.2
+
+EXPL = MB - 0.5
+t(0.55, EXPL - 0.25, "How a token's rows are found", 21, weight="bold", fam=S.DISPLAY, color=S.OURS_2)
 
 X0 = 3.3   # content column
 
 # ---------------------------------------------------------------- 1: token -> keys
-y_top = H - 1.95; y_bot = y_top - 1.55
+y_top = EXPL - 0.55; y_bot = y_top - 1.55
 tile(y_bot, y_top)
 stage(y_top, 1, "Token", "a new token and its\n1–2 predecessors")
 toks = ["…", "to", "be", "or", "not", "to", "be"]
@@ -260,7 +351,7 @@ t(vx + vw - 0.15, vy + 0.21, "n-gram table: 0 GB", 13, TXT, weight="bold", fam=S
 stat(eng_r + 0.3, y_bot5 + 0.42, "0 GB", "of VRAM")
 
 # ---------------------------------------------------------------- exact rows: the codec, and why not the shipped quant
-y_top6 = y_bot5 - 0.45; y_bot6 = y_top6 - 5.8
+y_top6 = y_bot5 - 0.45; y_bot6 = y_top6 - 5.0
 LX1 = 7.05
 box(0.4, y_bot6, LX1 - 0.4, y_top6 - y_bot6, S.HERO_TILE, r=0.14, alpha=S.HERO_TILE_ALPHA, z=1)
 box(LX1 + 0.2, y_bot6, W - 0.4 - LX1 - 0.2, y_top6 - y_bot6, S.HERO_TILE, r=0.14, alpha=S.HERO_TILE_ALPHA, z=1)
@@ -269,41 +360,30 @@ EXP_C, MAN_C, E_C = S.OURS, "#7D77A8", S.REF
 t(0.62, y_top6 - 0.5, "Lossless bf16: 320 → 232 B per row", 17, weight="bold", fam=S.DISPLAY)
 t(0.62, y_top6 - 0.8, "NGZ1: every row in a fixed 232 B slot (72.5%), bit-exact", 11, MUT)
 PX, PB = 0.7, 0.0185          # inches per byte
-r1y = y_top6 - 1.7
-t(PX, r1y + 0.55, "bf16 row · 320 B", 12, TXT, weight="bold")
-t(PX + 1.4, r1y + 0.55, "160 values × (sign 1 | exponent 8 | mantissa 7 bits)", 10.5, MUT)
-vw1 = 320 * PB / 160
-for v in range(160):
-    x = PX + v * vw1
-    ax.add_patch(plt.Rectangle((x, r1y), vw1 * 8 / 16, 0.42, fc=EXP_C, ec="none", zorder=2))
-    ax.add_patch(plt.Rectangle((x + vw1 * 8 / 16, r1y), vw1 * 8 / 16, 0.42, fc=MAN_C, ec="none", zorder=2))
+r1y = y_top6 - 1.65
+box(PX, r1y, 320 * PB, 0.48, "#5D5786", r=0.04)
+t(PX + 0.15, r1y + 0.24, "bf16 row · 320 B", 12, TXT, weight="bold", va="center")
+t(PX + 1.6, r1y + 0.24, "160 values × 2 B", 10.5, MUT, va="center")
 r2y = y_top6 - 2.75
-arrow(PX + 1.6, r1y - 0.08, PX + 1.6, r2y + 0.5, color=S.OURS_2, lw=1.6, ms=12)
-t(PX + 1.75, (r1y + r2y + 0.42) / 2 - 0.05, "split each value; code the exponents", 10.5, S.OURS_2, weight="bold")
-segs = [(0.13, E_C, "E"), (160 * PB, MAN_C, ""), (71 * PB, EXP_C, "")]
+arrow(PX + 1.6, r1y - 0.08, PX + 1.6, r2y + 0.56, color=S.OURS_2, lw=1.6, ms=12)
+t(PX + 1.75, (r1y + r2y + 0.48) / 2 - 0.05, "lossless, fixed size", 10.5, S.OURS_2, weight="bold")
+segs = [(0.22, E_C, "E", S.ON_LIGHT), (160 * PB, MAN_C, "sign + mantissa · 160 B", TXT),
+        (71 * PB, EXP_C, "offsets · 71 B", S.ON_LIGHT)]
 x = PX
-for w_, c, lab in segs:
-    ax.add_patch(plt.Rectangle((x, r2y), w_, 0.42, fc=c, ec=S.BG_BOTTOM, lw=1.0, zorder=2))
-    if lab:
-        t(x + w_ / 2, r2y + 0.21, lab, 11, S.ON_LIGHT, weight="bold", fam=S.DISPLAY, ha="center", va="center")
+for w_, c, lab, tc in segs:
+    ax.add_patch(plt.Rectangle((x, r2y), w_, 0.48, fc=c, ec=S.BG_BOTTOM, lw=1.2, zorder=2))
+    t(x + w_ / 2, r2y + 0.24, lab, 11, tc, weight="bold", ha="center", va="center")
     x += w_
-seg2c = PX + 0.13 + 160 * PB / 2; seg3c = PX + 0.13 + 160 * PB + 71 * PB / 2
-t(seg2c, r2y + 0.21, "sign + 7-bit mantissa · 160 B", 11, TXT, weight="bold", ha="center", va="center")
-t(seg3c, r2y + 0.21, "E − e · 71 B", 11, TXT, weight="bold", ha="center", va="center")
-t(PX + 232 * PB + 0.2, r2y + 0.21, "232 B slot", 12, TXT, weight="bold", va="center")
-t(PX, r2y - 0.3, "E: the row's largest exponent (1 B)", 10.5, MUT)
-t(seg3c + 0.66, r2y - 0.3, "Huffman-coded offsets", 10.5, MUT, ha="right")
-for k, line in enumerate([
-        "Values in a row share one scale and are Gaussian-like, so the offsets E − e",
-        "are small: 2.60 bits per value (entropy 2.56). Mantissas stay raw: they are",
-        "incompressible (6.97 of 7 bits). 12 of 320 M rows don't fit and go raw to an",
-        "escape section. Fixed slots keep random access, so bins and the cache are",
-        "unchanged. Decode goes straight to scaled fp16: 483 ns per row, 7.7 µs per",
-        "token, bit-identical to bf16; full-table verify: 0 mismatches."]):
-    t(0.62, r2y - 0.72 - k * 0.255, line, 10.5, MUT)
-t(0.62, y_bot6 + 0.55, "Payoff: 8 bundles per 16 KiB bin instead of 6, 2 per 4 KiB instead of 1,", 11,
+t(x + 0.18, r2y + 0.24, "232 B slot", 12, TXT, weight="bold", va="center")
+t(PX, r2y - 0.3, "E: the row's largest exponent, 1 B", 10.5, MUT)
+t(x, r2y - 0.3, "exponent offsets E − e, Huffman", 10.5, MUT, ha="right")
+t(0.62, r2y - 0.78, "Values in a row share one scale, so exponents are predictable (~2.6 bits each);", 11, TXT)
+t(0.62, r2y - 1.04, "mantissas stay raw. Fixed slots keep random access; decode is bit-identical.", 11, TXT)
+t(0.62, y_bot6 + 0.85, "Payoff: 8 bundles per 16 KiB bin instead of 6, 2 per 4 KiB instead of 1,", 11,
   S.OURS_2, weight="bold")
-t(0.62, y_bot6 + 0.28, "so the same RAM cache holds 31% more rows.", 11, S.OURS_2, weight="bold")
+t(0.62, y_bot6 + 0.59, "so the same RAM cache holds 31% more rows.", 11, S.OURS_2, weight="bold")
+t(0.62, y_bot6 + 0.32, "Exponent offsets: 2.60 bits per value (entropy 2.56) · 12 of 320 M rows in an escape section", 9, MUT)
+t(0.62, y_bot6 + 0.13, "Decode: 483 ns per row, 7.7 µs per token · full-table verify: 0 mismatches", 9, MUT)
 # right: why exact rows
 RX6 = LX1 + 0.42
 t(RX6, y_top6 - 0.5, "Why exact bf16, not the shipped quant", 17, weight="bold", fam=S.DISPLAY)
@@ -333,78 +413,6 @@ for k, line in enumerate([
         "within noise (−0.0005, 95% CI −0.0021 to +0.0012). Exact rows",
         "remove a measurable drift at no speed cost, not a benchmark gain."]):
     t(RX6, hy6 - 2.95 - k * 0.255, line, 10.5, MUT)
-
-# ---------------------------------------------------------------- results (bottom half)
-RES_TOP = y_bot6 - 0.55
-t(0.55, RES_TOP - 0.15, "Results", 21, weight="bold", fam=S.DISPLAY, color=S.OURS_2)
-
-
-def R(x, y, w, h):
-    """inches -> figure fraction"""
-    return [x / W, y / H, w / W, h / H]
-
-
-def card(rect_in, title, sub):
-    x, y, w, h = rect_in
-    box(x, y, w, h, S.HERO_TILE, r=0.14, alpha=S.HERO_TILE_ALPHA, z=1)
-    t(x + 0.24, y + h - 0.45, title, 19, weight="bold", fam=S.DISPLAY)
-    t(x + 0.24, y + h - 0.75, sub, 11, MUT)
-
-
-def plain_ax(rect_in):
-    a = fig.add_axes(R(*rect_in), zorder=3); a.set_facecolor("none"); a.grid(False)
-    for sp in a.spines.values():
-        sp.set_visible(False)
-    a.tick_params(colors=S.MUTED, length=0, pad=6)
-    return a
-
-
-def hbars(a, labels, vals, ours, fmt, top=None, room=1.38):
-    n = len(vals); y = np.arange(n)[::-1]; hi = top or max(vals)
-    for yy, lab, v, o in zip(y, labels, vals, ours):
-        a.barh([yy], [v], height=0.6, color=S.OURS if o else S.HERO_OTHER)
-        a.text(v + hi * 0.03, yy, fmt(v), va="center", fontfamily=S.DISPLAY, fontsize=15, fontweight="bold",
-               color=S.INK if o else S.MUTED)
-    a.set_yticks(y, labels, fontsize=12); a.set_xticks([]); a.set_xlim(0, hi * room); a.set_ylim(-0.6, n - 0.4)
-
-
-CB, CT = 1.25, RES_TOP - 0.45   # card bottom / top (inches)
-LW = 5.85
-# 1: grouped bins vs single rows
-card((0.4, CB, LW, CT - CB), "A third of the disk reads", "Disk reads per token, decode, cold cache")
-a = plain_ax((0.95, CB + 0.55, LW - 0.9, CT - CB - 1.9))
-x = np.arange(len(TEXTS)); bw2 = 0.38
-b1 = a.bar(x - bw2 / 2, ROWS, bw2, color=S.HERO_OTHER, label="Single-row reads")
-b2 = a.bar(x + bw2 / 2, BINS, bw2, color=S.OURS, label="Grouped bins")
-for bars, col in ((b1, S.MUTED), (b2, S.INK)):
-    for b in bars:
-        a.annotate(f"{b.get_height():.1f}", (b.get_x() + b.get_width() / 2, b.get_height()), xytext=(0, 4),
-                   textcoords="offset points", ha="center", fontfamily=S.DISPLAY, fontsize=14, fontweight="bold",
-                   color=col)
-for xi, r, b in zip(x, ROWS, BINS):
-    a.annotate(f"−{1 - b / r:.0%}", (xi + bw2 / 2, b), xytext=(0, 24), textcoords="offset points", ha="center",
-               fontsize=11, fontweight="bold", color=S.OURS_2)
-a.set_xticks(x, TEXTS, fontsize=12.5); a.set_yticks([]); a.set_ylim(0, 13.5)
-a.spines["bottom"].set_visible(True); a.spines["bottom"].set_color(S.HERO_OTHER)
-a.legend(loc="upper left", bbox_to_anchor=(0.0, 1.06), ncol=2, fontsize=11, handlelength=1.2)
-
-RX, RW = 0.4 + LW + 0.3, W - 0.8 - LW - 0.3
-mid = (CB + CT) / 2
-# 2: formats
-card((RX, mid + 0.15, RW, CT - mid - 0.15), "Exact rows cost only SSD space",
-     "Disk reads per token on new text · host time per token")
-a = plain_ax((RX + 1.95, mid + 0.4, RW - 2.35, CT - mid - 1.65))
-hbars(a, [f[0] for f in FORMATS], [f[1] for f in FORMATS], [f[3] for f in FORMATS],
-      lambda v: f"{v:.2f}" if v < 3 else f"~{v:.0f}", room=1.5)
-for (name, v, us, o), yy in zip(FORMATS, np.arange(len(FORMATS))[::-1]):
-    a.text(8.0 * 1.5, yy, f"{us} µs" if us else "—", va="center", ha="right", fontsize=12,
-           color=S.INK if o else S.MUTED)
-a.text(8.0 * 1.5, 2.62, "host time", va="center", ha="right", fontsize=10.5, color=S.MUTED)
-
-# 3: vs the engine's own reader
-card((RX, CB, RW, mid - 0.15 - CB), "30× fewer reads once warm", "Disk reads per round of ~1 M row lookups")
-a = plain_ax((RX + 1.95, CB + 0.3, RW - 2.35, mid - CB - 1.6))
-hbars(a, [r[0] for r in ROUND], [r[1] for r in ROUND], [r[2] for r in ROUND], lambda v: f"{v / 1000:.0f}k")
 
 t(0.55, 0.78, "Same decode speed (±0.4%), prefill +1–4% · 0 GB of VRAM: the tables live on the SSD "
               "(lossless bf16 bins: 103 GB) with an 8 GiB RAM row cache that gives way to KV under memory pressure",
