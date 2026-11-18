@@ -21,7 +21,7 @@ and longer contexts. In host RAM the row cache competes with the KV tier and giv
    frequent token sequence from a corpus profile (about 1.5 billion tokens). Reading one bin usually brings the next
    tokens' rows with it. Rare n-grams live in 4 KiB bins, grouped by bigram; hot bundles may appear in several bins
    (disk space is cheap).
-4. **One shared cache.** Every bundle of a bin that was read enters the broker's row cache (set-associative, CLOCK),
+4. **One shared cache.** Every bundle of a bin that was read enters the broker's row cache (CLOCK),
    shared by every engine process on the host. Reads use O_DIRECT through io_uring, never under the index lock.
 5. **Lossless bf16 rows.** The original bf16 rows, compressed losslessly (exponent offsets Huffman-coded) from 320 B
    to 232 B per row, decode straight to fp16 on the host in 7.7 µs per token. Per token they needed no more disk reads
