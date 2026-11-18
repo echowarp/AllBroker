@@ -96,4 +96,8 @@ The working set was about 7 GiB, so 8 GiB is the knee (this curve used an earlie
 
 ## Regenerating the graphic
 
-`docs/charts/ngram_tables.py` (matplotlib; fonts: Barlow, OFL, in `docs/charts/fonts/`).
+`docs/charts/ngram_tables.py` draws the whole graphic, the diagram on top and the result panels below (matplotlib 3.9; fonts: Barlow, OFL, in `docs/charts/fonts/`):
+
+```
+cd docs/charts && python3 ngram_tables.py ../img   # -> ../img/ngram-ssd-tables.png / .svg
+```
