@@ -27,8 +27,10 @@ ROUND = [("Engine's own reader", 555_000, False), ("Broker, cold", 268_000, True
 # 990 PRO, random aligned reads, QD1 p50 (ngram-bench sizes)
 READ_KIB = [4, 8, 16, 32, 64]
 READ_US = [68, 71, 78, 90, 107]
+# bin format (crates/ngram-store/src/bins.rs): u32 count | u32 reserved | count x u64 key | count x bundle
+BIN_HEAD, KEY, BUNDLE = 8, 8, 8 * 232   # lossless bf16 bundle: 8 rows x 232 B
 
-W, H = 13.0, 24.55
+W, H = 13.0, 31.2
 fig = plt.figure(figsize=(W, H))
 S.background(fig)
 ax = fig.add_axes([0, 0, 1, 1], zorder=2); ax.set_xlim(0, W); ax.set_ylim(0, H); ax.axis("off")
@@ -150,10 +152,10 @@ for i in range(ncol):
 t(8.95, y_top3 - 0.45, "Shared by every engine on the host", 12.5, TXT, weight="bold")
 t(8.95, y_top3 - 0.74, "CLOCK eviction · 8 GiB (the knee: working", 11, MUT)
 t(8.95, y_top3 - 1.0, "set ~7 GiB) · gives way to KV first", 11, MUT)
-HIT_X = 12.35   # hit path: straight down the right edge to step 5
+t(8.95, y_top3 - 1.26, "A hit goes straight to step 5", 11, MUT)
 
 # ---------------------------------------------------------------- 4: SSD bins
-y_top4 = y_bot3 - 0.6; y_bot4 = y_top4 - 5.5
+y_top4 = y_bot3 - 0.6; y_bot4 = y_top4 - 5.85
 arrow(X0 + 1.0, y_bot3 - 0.04, X0 + 1.0, y_top4 + 0.04, color=S.OURS)
 t(X0 + 1.12, (y_bot3 + y_top4) / 2 - 0.06, "miss", 11.5, S.OURS_2, weight="bold")
 tile(y_bot4, y_top4)
@@ -161,29 +163,36 @@ stage(y_top4, 4, "SSD bin", "on a miss: one O_DIRECT\nio_uring read of the\nwhol
 stat(0.62, y_bot4 + 2.05, "2.53", "disk reads per token")
 stat(0.62, y_bot4 + 0.9, "103 GB", "of bins on the SSD")
 
-t(X0, y_top4 - 0.42, "Directory in RAM: n-gram key → its best bin", 11, MUT)
-# token sequence above the bin: each token's bigram + trigram bundle
-seq = [("or", "be or", "to be or"), ("not", "or not", "be or not"), ("to", "not to", "or not to"),
-       ("be", "to be", "not to be")]
-bw, bh = 0.66, 0.78
-bx0, by = X0, y_top4 - 2.0
+# directory: a separate note, so its keys aren't read as the bin's tokens
+t(X0, y_top4 - 0.42, "RAM directory: n-gram key → the bin that holds it", 11, MUT)
+t(X0, y_top4 - 0.68, "(sorted array, binary search) · e.g. key (be, or) → bin #…", 11, MUT)
+# the bin follows the phrase "… to be | or not to be": per upcoming token, its bigram + trigram bundle
+seq = [("or", "be·or", "to·be·or"), ("not", "or·not", "be·or·not"), ("to", "not·to", "or·not·to"),
+       ("be", "to·be", "not·to·be")]
+bw, bh = 0.6, 0.78
+bx0, by = X0 + 0.75, y_top4 - 1.9
 for i, (tok, b2, b3) in enumerate(seq):
     x = bx0 + 2 * i * bw
-    box(x + 0.06, by + bh + 0.32, 2 * bw - 0.12, 0.36, S.BADGE, r=0.05)
-    t(x + bw, by + bh + 0.5, tok, 13, weight="bold", fam=S.DISPLAY, ha="center", va="center")
-    bundle(x + 0.03, by, bw - 0.06, bh, b2, False, size=10.5)
-    bundle(x + bw + 0.03, by, bw - 0.06, bh, b3, True, size=10.5)
+    bundle(x + 0.03, by, bw - 0.06, bh, b2, False, size=9)
+    bundle(x + bw + 0.03, by, bw - 0.06, bh, b3, True, size=9)
+    yb = by - 0.2   # bracket under the column's two bundles
+    ax.plot([x + 0.06, x + 0.06, x + 2 * bw - 0.06, x + 2 * bw - 0.06], [yb + 0.07, yb, yb, yb + 0.07],
+            color=S.OURS_2, lw=1.5, zorder=3)
+    ax.plot([x + bw, x + bw], [yb, yb - 0.1], color=S.OURS_2, lw=1.5, zorder=3)
+    box(x + 0.16, by - 0.68, 2 * bw - 0.32, 0.36, S.OURS, r=0.05)
+    t(x + bw, by - 0.5, tok, 13, S.ON_LIGHT, weight="bold", fam=S.DISPLAY, ha="center", va="center")
+t(bx0 - 0.1, by - 0.5, "… to be", 13, MUT, weight="bold", fam=S.DISPLAY, ha="right", va="center")
 bin_w = 8 * bw
 box(bx0 - 0.08, by - 0.1, bin_w + 0.16, bh + 0.2, "none", ec=TXT, lw=1.6, r=0.06)
-t(bx0 - 0.08, by - 0.38, "One 16 KiB bin = 8 bundles", 12.5, TXT, weight="bold", va="center")
-for k, line in enumerate(["A bundle is one n-gram's 8 rows: one read, not eight.",
-                          "Each bigram sits next to its frequent trigrams; the bin follows a",
-                          "frequent token sequence from a ~1.5 B-token corpus profile, so one",
-                          "read brings the next tokens' rows. All its bundles enter the cache."]):
-    t(bx0 - 0.08, by - 0.68 - k * 0.26, line, 11, MUT, va="center")
+t(X0, by - 1.05, "One 16 KiB read brings the rows for the next four tokens", 12.5, TXT, weight="bold",
+  va="center")
+for k, line in enumerate(["Per upcoming token: its bigram (prev, token) and trigram (prev2, prev, token).",
+                          "8 bundles, each one n-gram's 8 rows (one read, not eight). Bins follow frequent",
+                          "phrases from a ~1.5 B-token corpus profile; every bundle enters the cache."]):
+    t(X0, by - 1.35 - k * 0.26, line, 11, MUT, va="center")
 # all bundles -> cache
-ux = bx0 + bin_w - 0.3
-arrow(ux, by + bh + 0.75, ux, y_bot3 + 0.3, color=S.OURS_2, lw=1.6, ms=12)
+ux = bx0 + bin_w - 0.25
+arrow(ux, by + bh + 0.12, ux, y_bot3 + 0.3, color=S.OURS_2, lw=1.6, ms=12)
 t(ux - 0.12, (y_bot3 + y_top4) / 2 - 0.06, "whole bin cached", 11, S.OURS_2, ha="right", weight="bold")
 
 # rare n-grams, duplication
@@ -199,27 +208,30 @@ bundle(X0 + 0.37, ry2, sw4 - 0.06, 0.5, "to be", False, dashed=True, size=10.5)
 t(X0 + 2 * sw4 + 0.25, ry2 + 0.38, "Hot bundles may be copied into several bins", 11, TXT, weight="bold")
 t(X0 + 2 * sw4 + 0.25, ry2 + 0.12, "(disk is cheap)", 11, MUT)
 
-# inset: read size vs latency
+# inset: read size vs latency, and how many bundles each read holds
 ix, iw = 9.2, 3.05
-t(ix, y_top4 - 0.42, "Why 16 KiB: a bigger read", 12.5, TXT, weight="bold")
-t(ix, y_top4 - 0.68, "is nearly free", 12.5, TXT, weight="bold")
-t(ix, y_top4 - 0.95, "990 PRO, random aligned read, QD1 p50", 10, MUT)
-t(ix, y_top4 - 1.33, "4× the data, +15% time", 14, S.OURS_2, weight="bold", fam=S.DISPLAY)
-t(ix, y_top4 - 1.6, "the drive reads its 16 KiB NAND flash", 10.5, MUT)
-t(ix, y_top4 - 1.84, "page anyway: bins match it, 16 KiB aligned", 10.5, MUT)
-iy = y_bot4 + 0.8
-scale = 2.15 / 107
+t(ix, y_top4 - 0.42, "Why 16 KiB bins", 14, TXT, weight="bold")
+t(ix, y_top4 - 0.7, "990 PRO, random aligned reads, QD1 p50", 10, MUT)
+t(ix, y_top4 - 1.08, "4× the bundles, +15% time", 14, S.OURS_2, weight="bold", fam=S.DISPLAY)
+t(ix, y_top4 - 1.36, "The drive reads a whole 16 KiB NAND flash", 10.5, MUT)
+t(ix, y_top4 - 1.6, "page anyway; bins match it, 16 KiB aligned.", 10.5, MUT)
+iy = y_bot4 + 1.05
+scale = 1.9 / 107
 bar_w = iw / len(READ_KIB)
 for k, (kib, us) in enumerate(zip(READ_KIB, READ_US)):
     x = ix + k * bar_w + 0.08
     hi = kib == 16
+    nb = (kib * 1024 - BIN_HEAD) // (BUNDLE + KEY)
     box(x, iy, bar_w - 0.16, us * scale, S.OURS if hi else S.HERO_OTHER, r=0.03)
     t(x + (bar_w - 0.16) / 2, iy + us * scale + 0.08, f"{us} µs", 12 if hi else 11, TXT if hi else MUT,
       weight="bold", fam=S.DISPLAY, ha="center")
     t(x + (bar_w - 0.16) / 2, iy - 0.24, f"{kib} KiB", 10.5, TXT if hi else MUT, weight="bold" if hi else "normal",
       ha="center")
+    t(x + (bar_w - 0.16) / 2, iy - 0.52, f"{nb}", 13 if hi else 12, S.OURS_2 if hi else MUT, weight="bold",
+      fam=S.DISPLAY, ha="center")
 ax.plot([ix, ix + iw], [iy, iy], color=EDGE, lw=1.0, zorder=3)
-t(ix, iy - 0.52, "Measured; the drive reports 512 B sectors", 9.5, MUT)
+t(ix, iy - 0.78, "bundles per read (lossless bf16, 1,856 B each)", 9.5, MUT)
+t(ix, iy - 0.99, "Measured; the drive reports 512 B sectors", 9.5, MUT)
 
 # ---------------------------------------------------------------- 5: rows to the engine
 y_top5 = y_bot4 - 0.6; y_bot5 = y_top5 - 2.05
@@ -228,7 +240,7 @@ tile(y_bot5, y_top5)
 stage(y_top5, 5, "Rows to the engine", "exact rows, never in VRAM")
 stat(0.62, y_bot5 + 0.42, "25 µs", "host time per token")
 
-steps = [("Lossless bf16", "320 → 232 B per row,\nexact (Huffman exponents)"),
+steps = [("Lossless bf16", "320 → 232 B per row,\nexact (below)"),
          ("fp16 on the host", "decoded in 7.7 µs\nper token"),
          ("Engine", "reads hide behind\nlayer 0's compute")]
 sx, swd, sgap, sy = X0, 2.15, 0.45, y_top5 - 1.15
@@ -240,12 +252,6 @@ for k, (h, d) in enumerate(steps):
     if k < 2:
         arrow(x + swd + 0.05, sy + 0.48, x + swd + sgap - 0.05, sy + 0.48, color=S.OURS)
 eng_r = sx + 3 * swd + 2 * sgap
-# hit path from the cache, down the right edge into the engine
-hy = cy + 0.12
-ax.plot([cx + cwid + 0.02, HIT_X, HIT_X], [hy, hy, sy + 0.48], color=S.OURS, lw=1.8, zorder=3)
-arrow(HIT_X, sy + 0.48, eng_r + 0.05, sy + 0.48, color=S.OURS, lw=1.8)
-ax.text(HIT_X + 0.15, (hy + y_top5) / 2, "hit", fontsize=11.5, color=S.OURS, fontweight="bold", rotation=-90,
-        ha="center", va="center", zorder=4)
 # VRAM bar
 vx, vy, vw = X0, y_bot5 + 0.22, eng_r - X0
 box(vx, vy, vw, 0.42, S.OURS_MID, r=0.06)
@@ -253,8 +259,83 @@ t(vx + 0.15, vy + 0.21, "VRAM stays KV cache (and weights)", 12.5, TXT, weight="
 t(vx + vw - 0.15, vy + 0.21, "n-gram table: 0 GB", 13, TXT, weight="bold", fam=S.DISPLAY, ha="right", va="center")
 stat(eng_r + 0.3, y_bot5 + 0.42, "0 GB", "of VRAM")
 
+# ---------------------------------------------------------------- exact rows: the codec, and why not the shipped quant
+y_top6 = y_bot5 - 0.45; y_bot6 = y_top6 - 5.8
+LX1 = 7.05
+box(0.4, y_bot6, LX1 - 0.4, y_top6 - y_bot6, S.HERO_TILE, r=0.14, alpha=S.HERO_TILE_ALPHA, z=1)
+box(LX1 + 0.2, y_bot6, W - 0.4 - LX1 - 0.2, y_top6 - y_bot6, S.HERO_TILE, r=0.14, alpha=S.HERO_TILE_ALPHA, z=1)
+EXP_C, MAN_C, E_C = S.OURS, "#7D77A8", S.REF
+# left: row layout
+t(0.62, y_top6 - 0.5, "Lossless bf16: 320 → 232 B per row", 17, weight="bold", fam=S.DISPLAY)
+t(0.62, y_top6 - 0.8, "NGZ1: every row in a fixed 232 B slot (72.5%), bit-exact", 11, MUT)
+PX, PB = 0.7, 0.0185          # inches per byte
+r1y = y_top6 - 1.7
+t(PX, r1y + 0.55, "bf16 row · 320 B", 12, TXT, weight="bold")
+t(PX + 1.4, r1y + 0.55, "160 values × (sign 1 | exponent 8 | mantissa 7 bits)", 10.5, MUT)
+vw1 = 320 * PB / 160
+for v in range(160):
+    x = PX + v * vw1
+    ax.add_patch(plt.Rectangle((x, r1y), vw1 * 8 / 16, 0.42, fc=EXP_C, ec="none", zorder=2))
+    ax.add_patch(plt.Rectangle((x + vw1 * 8 / 16, r1y), vw1 * 8 / 16, 0.42, fc=MAN_C, ec="none", zorder=2))
+r2y = y_top6 - 2.75
+arrow(PX + 1.6, r1y - 0.08, PX + 1.6, r2y + 0.5, color=S.OURS_2, lw=1.6, ms=12)
+t(PX + 1.75, (r1y + r2y + 0.42) / 2 - 0.05, "split each value; code the exponents", 10.5, S.OURS_2, weight="bold")
+segs = [(0.13, E_C, "E"), (160 * PB, MAN_C, ""), (71 * PB, EXP_C, "")]
+x = PX
+for w_, c, lab in segs:
+    ax.add_patch(plt.Rectangle((x, r2y), w_, 0.42, fc=c, ec=S.BG_BOTTOM, lw=1.0, zorder=2))
+    if lab:
+        t(x + w_ / 2, r2y + 0.21, lab, 11, S.ON_LIGHT, weight="bold", fam=S.DISPLAY, ha="center", va="center")
+    x += w_
+seg2c = PX + 0.13 + 160 * PB / 2; seg3c = PX + 0.13 + 160 * PB + 71 * PB / 2
+t(seg2c, r2y + 0.21, "sign + 7-bit mantissa · 160 B", 11, TXT, weight="bold", ha="center", va="center")
+t(seg3c, r2y + 0.21, "E − e · 71 B", 11, TXT, weight="bold", ha="center", va="center")
+t(PX + 232 * PB + 0.2, r2y + 0.21, "232 B slot", 12, TXT, weight="bold", va="center")
+t(PX, r2y - 0.3, "E: the row's largest exponent (1 B)", 10.5, MUT)
+t(seg3c + 0.66, r2y - 0.3, "Huffman-coded offsets", 10.5, MUT, ha="right")
+for k, line in enumerate([
+        "Values in a row share one scale and are Gaussian-like, so the offsets E − e",
+        "are small: 2.60 bits per value (entropy 2.56). Mantissas stay raw: they are",
+        "incompressible (6.97 of 7 bits). 12 of 320 M rows don't fit and go raw to an",
+        "escape section. Fixed slots keep random access, so bins and the cache are",
+        "unchanged. Decode goes straight to scaled fp16: 483 ns per row, 7.7 µs per",
+        "token, bit-identical to bf16; full-table verify: 0 mismatches."]):
+    t(0.62, r2y - 0.72 - k * 0.255, line, 10.5, MUT)
+t(0.62, y_bot6 + 0.55, "Payoff: 8 bundles per 16 KiB bin instead of 6, 2 per 4 KiB instead of 1,", 11,
+  S.OURS_2, weight="bold")
+t(0.62, y_bot6 + 0.28, "so the same RAM cache holds 31% more rows.", 11, S.OURS_2, weight="bold")
+# right: why exact rows
+RX6 = LX1 + 0.42
+t(RX6, y_top6 - 0.5, "Why exact bf16, not the shipped quant", 17, weight="bold", fam=S.DISPLAY)
+cols = [(RX6, "Rows as shipped", "left"), (10.45, "Per row", "right"), (11.45, "Row error", "right"),
+        (12.4, "KL vs bf16", "right")]
+hy6 = y_top6 - 1.0
+for xx, lab, ha in cols:
+    t(xx, hy6, lab, 10, MUT, ha=ha)
+ax.plot([RX6, 12.4], [hy6 - 0.1, hy6 - 0.1], color=EDGE, lw=1.0, zorder=3)
+tab = [("IQ4_NL (GGUF UD-Q4_K_XL)", "90 B", "7.6% rms", "0.011", False),
+       ("K6 trellis (EXL3 4.05)", "122 B", "1.7% rms", "0.0072", False),
+       ("Lossless bf16 (AllBroker)", "232 B", "exact", "0", True)]
+for k, row in enumerate(tab):
+    yy = hy6 - 0.38 - k * 0.32
+    for (xx, _, ha), v in zip(cols, row[:4]):
+        t(xx, yy, v, 11.5, TXT if row[4] else MUT, weight="bold" if row[4] else "normal", ha=ha)
+t(RX6, hy6 - 1.38, "KL reference: rounding noise alone 0.006 (top-1 97.4%)", 10, MUT)
+for k, line in enumerate([
+        "Quantizing saves VRAM, but these rows never live in VRAM:",
+        "they come from the SSD and RAM only caches them. Exact rows",
+        "cost only SSD space (103 GB of bins), need no more disk reads",
+        "than IQ4 (2.53 vs ~2.9 per token) and less host time (25 vs 35 µs)."]):
+    t(RX6, hy6 - 1.8 - k * 0.255, line, 10.5, TXT if k == 0 else MUT, weight="bold" if k == 0 else "normal")
+for k, line in enumerate([
+        "IQ4 rows move the output distribution about twice as far as",
+        "rounding noise (KL 0.011, top-1 96.6%); next-token loss stays",
+        "within noise (−0.0005, 95% CI −0.0021 to +0.0012). Exact rows",
+        "remove a measurable drift at no speed cost, not a benchmark gain."]):
+    t(RX6, hy6 - 2.95 - k * 0.255, line, 10.5, MUT)
+
 # ---------------------------------------------------------------- results (bottom half)
-RES_TOP = y_bot5 - 0.55
+RES_TOP = y_bot6 - 0.55
 t(0.55, RES_TOP - 0.15, "Results", 21, weight="bold", fam=S.DISPLAY, color=S.OURS_2)
 
 
