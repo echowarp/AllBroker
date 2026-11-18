@@ -39,6 +39,13 @@ Engines on different GPUs map one host-RAM pool (here 10 GiB: 186 slots of 3,200
 since GDN-state entries share the slots), so a prefix one GPU prefilled can be loaded by the other. The SSD tier is
 marked "next": it is in this repo, but the measured deployment runs without it.
 
+![N-gram tables from the SSD, not VRAM](docs/img/ngram-ssd-tables.png)
+
+For models with large n-gram embedding tables (Qwen3.8-Flash-Next: ~100 GB, 16 rows per token per layer), the broker
+serves the rows from the SSD through a shared RAM row cache and never puts them in VRAM. Grouped bins cut disk reads
+per token by 60–67 %, exact (losslessly compressed bf16) rows need fewer reads than 4-bit ones, and decode speed is
+unchanged. Measured with the gufo engine on a Strix Halo host; details in [docs/ngram-tables.md](docs/ngram-tables.md).
+
 Measured with Qwen3.8-27B EXL3 4.0 bpw and int4 KV in the [AllRunner](https://github.com/echowarp/AllRunner)
 deployment (one NVIDIA and one Intel GPU on one broker). The charts are generated in AllRunner
 ([benchmarks/charts](https://github.com/echowarp/AllRunner/tree/main/benchmarks/charts)); methods and sources are in its
